@@ -1,5 +1,6 @@
 package org.sosby.penguin;
 
+import android.net.Uri;
 import android.os.AsyncTask;
 
 import org.apache.http.client.HttpClient;
@@ -16,12 +17,17 @@ import java.net.URISyntaxException;
 
 public class CoinbaseRest extends BaseMarketDataProvider {
 
-    private static final String TRADE_URL = "https://api.exchange.coinbase.com/products/btc-usd/trades?limit=2";
-
     private static URI uri;
     static {
         try {
-            uri = new URI(TRADE_URL);
+            Uri.Builder builder = new Uri.Builder();
+            builder.scheme("https")
+                    .authority("api.exchange.coinbase.com")
+                    .appendPath("products")
+                    .appendPath("btc-usd")
+                    .appendPath("trades")
+                    .appendQueryParameter("limit", "2");
+            uri = new URI(builder.build().toString());
         } catch (URISyntaxException ex) {
         }
     }
