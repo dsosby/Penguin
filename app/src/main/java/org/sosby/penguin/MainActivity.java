@@ -56,24 +56,13 @@ public class MainActivity extends ActionBarActivity implements IMarketDataProvid
     protected void onResume() {
         super.onResume();
         mProvider.resume();
-        updateBands();
+        updateBands(false);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         mProvider.resume();
-
-        try {
-            for (BandDeviceInfo bandInfo : BandClientManager.getInstance().getPairedBands()) {
-                BandClient band = BandClientManager.getInstance().create(this, bandInfo);
-                if (band.isConnected()) {
-                    band.disconnect().await();
-                }
-            }
-        } catch (Exception ex) {
-            Log.e(TAG, "Shit: " + ex);
-        }
     }
 
     @Override
@@ -94,6 +83,9 @@ public class MainActivity extends ActionBarActivity implements IMarketDataProvid
         if (id == R.id.action_sync) {
             mProvider.sync();
             return true;
+        } else if (id == R.id.action_reset_band) {
+            updateBands(true);
+            return true;
         } else if (id == R.id.action_settings) {
             return true;
         }
@@ -112,7 +104,20 @@ public class MainActivity extends ActionBarActivity implements IMarketDataProvid
         mLastTradePrice.setText(NumberFormat.getCurrencyInstance().format(price));
     }
 
-    private void updateBands() {
+    private void disconnectBands() {
+        try {
+            for (BandDeviceInfo bandInfo : BandClientManager.getInstance().getPairedBands()) {
+                BandClient band = BandClientManager.getInstance().create(this, bandInfo);
+                if (band.isConnected()) {
+                    band.disconnect().await();
+                }
+            }
+        } catch (Exception ex) {
+            Log.e(TAG, "Shit: " + ex);
+        }
+    }
+
+    private void updateBands(boolean force) {
         BandClientManager bandManager = BandClientManager.getInstance();
         BandDeviceInfo[] paired = bandManager.getPairedBands();
         mBandsAdapter.clear();
@@ -130,9 +135,20 @@ public class MainActivity extends ActionBarActivity implements IMarketDataProvid
         }
     }
 
+    private void removeBandTile(BandClient band) {
+        try {
+            for (BandTile tile : band.getTileManager().getTiles().await()) {
+                band.getTileManager().removeTile(tile);
+            }
+        } catch (Exception ex) {}
+    }
+
+    private static final boolean RESET = false;
     private void updateBand(BandClient band) {
         try {
-            //Remove old tiles
+            if (RESET)
+                removeBandTile(band);
+
             BandTileManager tiles = band.getTileManager();
             if (tiles.getTiles().await().size() > 0) {
                 Log.i(TAG, "Band Tile Installed");
