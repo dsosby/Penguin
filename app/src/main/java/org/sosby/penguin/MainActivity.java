@@ -1,22 +1,37 @@
 package org.sosby.penguin;
 
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.support.v7.app.ActionBarActivity;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.widget.ArrayAdapter;
+import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.microsoft.band.BandClient;
+import com.microsoft.band.BandClientManager;
+import com.microsoft.band.BandDeviceInfo;
+import com.microsoft.band.tiles.BandIcon;
+import com.microsoft.band.tiles.BandTile;
+import com.microsoft.band.tiles.BandTileManager;
+
 import java.math.BigDecimal;
 import java.text.NumberFormat;
-
+import java.util.UUID;
 
 public class MainActivity extends ActionBarActivity implements IMarketDataProvider.Events {
 
     private static final String TAG = MainActivity.class.getCanonicalName();
 
     private TextView mLastTradePrice;
+    private ListView mBands;
+
     private IMarketDataProvider mProvider;
+    private ArrayAdapter<BandDeviceInfo> mBandsAdapter;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -24,14 +39,21 @@ public class MainActivity extends ActionBarActivity implements IMarketDataProvid
         setContentView(R.layout.activity_main);
 
         mLastTradePrice = (TextView) findViewById(R.id.last_trade_price);
+        mBands = (ListView) findViewById(R.id.paired_bands);
+
         mProvider = new CoinbaseRest(60000);
         mProvider.addListener(this);
+
+        BandDeviceInfo[] bands = BandClientManager.getInstance().getPairedBands();
+        mBandsAdapter = new ArrayAdapter<BandDeviceInfo>(this, android.R.layout.simple_list_item_1);
+        mBands.setAdapter(mBandsAdapter);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         mProvider.resume();
+        updateBands();
     }
 
     @Override
@@ -74,5 +96,42 @@ public class MainActivity extends ActionBarActivity implements IMarketDataProvid
     @Override
     public void onTrade(BigDecimal price, IMarketDataProvider.Side side) {
         mLastTradePrice.setText(NumberFormat.getCurrencyInstance().format(price));
+    }
+
+    private void updateBands() {
+        BandClientManager bandManager = BandClientManager.getInstance();
+        BandDeviceInfo[] paired = bandManager.getPairedBands();
+        mBandsAdapter.clear();
+        mBandsAdapter.addAll(paired);
+
+        Bitmap tileIcon = createBandIcon();
+
+        for (BandDeviceInfo bandInfo : paired) {
+            try {
+                BandClient band = bandManager.create(this, bandInfo);
+
+                //Remove old tiles
+                BandTileManager tiles = band.getTileManager();
+                for (BandTile tile : tiles.getTiles().await()) {
+                    tiles.removeTile(tile);
+                }
+
+                if (tiles.getRemainingTileCapacity().await() > 0) {
+                    BandTile tile = new BandTile.Builder(UUID.randomUUID(),
+                            "Coinbase",
+                            BandIcon.toBandIcon(tileIcon))
+                            .build();
+
+                    tiles.addTile(this, tile);
+                }
+            } catch (Exception ex) {
+                Log.e(TAG, ex.toString());
+                Toast.makeText(this, "Band Error: " + ex, Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private Bitmap createBandIcon() {
+        return BitmapFactory.decodeResource(getResources(), R.drawable.ic_bitcoin_46x46);
     }
 }
