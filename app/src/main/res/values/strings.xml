@@ -5,4 +5,5 @@
     <string name="generic_error">Something went wrong: %1$s</string>
     <string name="unknown_price">\?\?\?</string>
     <string name="sync">Sync</string>
+    <string name="band_tile_name">Bitchang</string>
 </resources>

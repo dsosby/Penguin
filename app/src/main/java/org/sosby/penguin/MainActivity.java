@@ -1,7 +1,9 @@
 package org.sosby.penguin;
 
+import android.app.Activity;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.os.AsyncTask;
 import android.support.v7.app.ActionBarActivity;
 import android.os.Bundle;
 import android.util.Log;
@@ -15,6 +17,7 @@ import android.widget.Toast;
 import com.microsoft.band.BandClient;
 import com.microsoft.band.BandClientManager;
 import com.microsoft.band.BandDeviceInfo;
+import com.microsoft.band.BandException;
 import com.microsoft.band.tiles.BandIcon;
 import com.microsoft.band.tiles.BandTile;
 import com.microsoft.band.tiles.BandTileManager;
@@ -29,6 +32,7 @@ public class MainActivity extends ActionBarActivity implements IMarketDataProvid
 
     private TextView mLastTradePrice;
     private ListView mBands;
+    private Bitmap mBitcoinIcon;
 
     private IMarketDataProvider mProvider;
     private ArrayAdapter<BandDeviceInfo> mBandsAdapter;
@@ -44,8 +48,7 @@ public class MainActivity extends ActionBarActivity implements IMarketDataProvid
         mProvider = new CoinbaseRest(60000);
         mProvider.addListener(this);
 
-        BandDeviceInfo[] bands = BandClientManager.getInstance().getPairedBands();
-        mBandsAdapter = new ArrayAdapter<BandDeviceInfo>(this, android.R.layout.simple_list_item_1);
+        mBandsAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1);
         mBands.setAdapter(mBandsAdapter);
     }
 
@@ -60,6 +63,17 @@ public class MainActivity extends ActionBarActivity implements IMarketDataProvid
     protected void onPause() {
         super.onPause();
         mProvider.resume();
+
+        try {
+            for (BandDeviceInfo bandInfo : BandClientManager.getInstance().getPairedBands()) {
+                BandClient band = BandClientManager.getInstance().create(this, bandInfo);
+                if (band.isConnected()) {
+                    band.disconnect().await();
+                }
+            }
+        } catch (Exception ex) {
+            Log.e(TAG, "Shit: " + ex);
+        }
     }
 
     @Override
@@ -104,34 +118,85 @@ public class MainActivity extends ActionBarActivity implements IMarketDataProvid
         mBandsAdapter.clear();
         mBandsAdapter.addAll(paired);
 
-        Bitmap tileIcon = createBandIcon();
-
         for (BandDeviceInfo bandInfo : paired) {
-            try {
-                BandClient band = bandManager.create(this, bandInfo);
+            BandClient band = bandManager.create(this, bandInfo);
 
-                //Remove old tiles
-                BandTileManager tiles = band.getTileManager();
-                for (BandTile tile : tiles.getTiles().await()) {
-                    tiles.removeTile(tile);
-                }
-
-                if (tiles.getRemainingTileCapacity().await() > 0) {
-                    BandTile tile = new BandTile.Builder(UUID.randomUUID(),
-                            "Coinbase",
-                            BandIcon.toBandIcon(tileIcon))
-                            .build();
-
-                    tiles.addTile(this, tile);
-                }
-            } catch (Exception ex) {
-                Log.e(TAG, ex.toString());
-                Toast.makeText(this, "Band Error: " + ex, Toast.LENGTH_SHORT).show();
+            if (!band.isConnected()) {
+                ConnectDeviceTask connectTask = new ConnectDeviceTask();
+                connectTask.execute(band);
+            } else {
+                updateBand(band);
             }
         }
     }
 
-    private Bitmap createBandIcon() {
-        return BitmapFactory.decodeResource(getResources(), R.drawable.ic_bitcoin_46x46);
+    private void updateBand(BandClient band) {
+        try {
+            //Remove old tiles
+            BandTileManager tiles = band.getTileManager();
+            if (tiles.getTiles().await().size() > 0) {
+                Log.i(TAG, "Band Tile Installed");
+                //TODO: Should update the tile somehow?
+                return;
+            }
+
+            if (tiles.getRemainingTileCapacity().await() > 0) {
+                BandTile tile = new BandTile.Builder(UUID.randomUUID(),
+                        getString(R.string.band_tile_name),
+                        BandIcon.toBandIcon(getBandIcon()))
+                        .build();
+
+                tiles.addTile(this, tile);
+            }
+        } catch (Exception ex) {
+            Log.e(TAG, ex.toString());
+            Toast.makeText(this, "Band Error: " + ex, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private Bitmap getBandIcon() {
+        if (mBitcoinIcon == null) {
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inScaled = false;
+            mBitcoinIcon = BitmapFactory.decodeResource(getResources(),
+                    R.drawable.ic_bitcoin_46x46,
+                    opts);
+        }
+
+        return mBitcoinIcon;
+    }
+
+    private class ConnectDeviceTask extends AsyncTask<BandClient, Void, Boolean> {
+
+        private BandClient[] mBands;
+
+        @Override
+        protected Boolean doInBackground(BandClient... params) {
+            boolean success = true;
+            mBands = params;
+
+            for (BandClient band : mBands) {
+                try {
+                    band.connect().await();
+                    success &= true;
+                } catch (Exception ex) {
+                    Log.e(TAG, ex.toString());
+                    success = false;
+                }
+            }
+
+            return success;
+        }
+
+        @Override
+        protected void onPostExecute(Boolean success) {
+            if (success) {
+                for (BandClient band : mBands) {
+                    if (band.isConnected()) {
+                        updateBand(band);
+                    }
+                }
+            }
+        }
     }
 }
